@@ -1,5 +1,6 @@
 package org.canalesCMAC.infrastructure.camel;
 
+import org.apache.camel.CamelExecutionException;
 import org.apache.camel.ProducerTemplate;
 import org.canalesCMAC.application.port.RecaudacionChannel;
 import org.canalesCMAC.domain.model.RecaudacionRequest;
@@ -16,6 +17,13 @@ public class RecaudacionCamelChannel implements RecaudacionChannel {
 
     @Override
     public RecaudacionResponse ejecutar(RecaudacionRequest solicitud) {
-        return producerTemplate.requestBody("direct:recaudacion", solicitud, RecaudacionResponse.class);
+        try {
+            return producerTemplate.requestBody("direct:recaudacion", solicitud, RecaudacionResponse.class);
+        } catch (CamelExecutionException excepcion) {
+            if (excepcion.getCause() instanceof RuntimeException causa) {
+                throw causa;
+            }
+            throw excepcion;
+        }
     }
 }

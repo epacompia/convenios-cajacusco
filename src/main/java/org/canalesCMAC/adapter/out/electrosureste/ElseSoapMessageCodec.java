@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import org.canalesCMAC.application.CatalogoCodigos;
 import org.canalesCMAC.domain.exception.OperadorNoSoportadoException;
 import org.canalesCMAC.domain.model.Canonico;
 import org.canalesCMAC.domain.model.Institucion;
@@ -17,6 +18,7 @@ import org.canalesCMAC.domain.model.RecaudacionRequest;
 import org.canalesCMAC.domain.model.RecaudacionResponse;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import javax.xml.XMLConstants;
@@ -43,6 +45,9 @@ public class ElseSoapMessageCodec {
     @ConfigProperty(name = "recaudacion.electrosureste.soap.namespace", defaultValue = "http://tempuri.org/")
     String namespace;
 
+    @Inject
+    CatalogoCodigos catalogo;
+
     public String serializar(RecaudacionRequest peticion) {
         String operacion = operacion(peticion.operador());
         Map<String, String> campos = campos(peticion.operador(), peticion);
@@ -62,7 +67,7 @@ public class ElseSoapMessageCodec {
     public RecaudacionResponse deserializar(String xmlSoap, RecaudacionRequest peticion) {
         Element raizRespuesta = raizRespuesta(xmlSoap);
         String codigo = mapeoCodigo(peticion.operador(), raizRespuesta);
-        String mensaje = mapeoMensaje(peticion.operador(), raizRespuesta);
+        String mensaje = catalogo.mensaje(Institucion.ELSE, codigo, mapeoMensaje(peticion.operador(), raizRespuesta));
         Map<String, Object> datos = "00".equals(codigo)
             ? mapearDatos(peticion.operador(), raizRespuesta)
             : Map.of();

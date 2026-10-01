@@ -11,6 +11,7 @@ import java.util.Map;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import org.canalesCMAC.application.CatalogoCodigos;
 import org.canalesCMAC.domain.exception.OperadorNoSoportadoException;
 import org.canalesCMAC.domain.model.Canonico;
 import org.canalesCMAC.domain.model.Institucion;
@@ -30,6 +31,9 @@ public class ElectroUcayaliConvertidor {
 
     @Inject
     ObjectMapper objectMapper;
+
+    @Inject
+    CatalogoCodigos catalogo;
 
     @ConfigProperty(name = "recaudacion.electroucayali.codempresa", defaultValue = "05")
     String codEmpresa;
@@ -117,7 +121,7 @@ public class ElectroUcayaliConvertidor {
         try {
             JsonNode nodo = objectMapper.readTree(json);
             String codigo = nodo.path("codigo").asText("99");
-            String mensaje = nodo.path("mensaje").asText("");
+            String mensaje = catalogo.mensaje(Institucion.ELECTRO_UCAYALI, codigo, nodo.path("mensaje").asText(""));
             Map<String, Object> datos = new LinkedHashMap<>();
             extraerSiExiste(nodo, datos, "nroSumin", Canonico.NUMERO_SUMINISTRO);
             extraerSiExiste(nodo, datos, "nombreCliente", Canonico.NOMBRE_CLIENTE);

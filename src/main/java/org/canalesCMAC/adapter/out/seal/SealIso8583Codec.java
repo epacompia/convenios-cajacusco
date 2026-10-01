@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
+import org.canalesCMAC.application.CatalogoCodigos;
 import org.canalesCMAC.domain.exception.OperadorNoSoportadoException;
 import org.canalesCMAC.domain.model.Canonico;
 import org.canalesCMAC.domain.model.Institucion;
@@ -16,6 +17,7 @@ import org.canalesCMAC.domain.model.RecaudacionRequest;
 import org.canalesCMAC.domain.model.RecaudacionResponse;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 @ApplicationScoped
@@ -52,6 +54,9 @@ public class SealIso8583Codec {
     @ConfigProperty(name = "recaudacion.seal.direccion", defaultValue = "")
     String direccion;
 
+    @Inject
+    CatalogoCodigos catalogo;
+
     public String construir(RecaudacionRequest peticion) {
         Operacion operacion = Operacion.de(peticion.operador());
         LocalDateTime fecha = fechaOperacion(peticion);
@@ -85,7 +90,7 @@ public class SealIso8583Codec {
         if (codigo == null || codigo.isBlank()) {
             codigo = "99";
         }
-        String mensaje = mensaje(codigo);
+        String mensaje = catalogo.mensaje(Institucion.SEAL, codigo, "");
         Map<String, Object> datos = new LinkedHashMap<>();
         if ("00".equals(codigo)) {
             Map<String, String> privados = subcampos(campos.get(121));
@@ -265,16 +270,6 @@ public class SealIso8583Codec {
             return LocalDateTime.parse(valor.toString(), DateTimeFormatter.ISO_LOCAL_DATE_TIME);
         }
         return LocalDateTime.now();
-    }
-
-    private String mensaje(String codigo) {
-        return switch (codigo) {
-            case "00" -> "TRANSACCION CORRECTA";
-            case "06" -> "FORMATO DE MENSAJE INVALIDO";
-            case "07" -> "CONTRATO NO ESTA DISPONIBLE PARA SER PAGADO";
-            case "20" -> "SIN PAGO PARA EXTORNAR";
-            default -> "";
-        };
     }
 
     private BigDecimal decimal(String valor) {

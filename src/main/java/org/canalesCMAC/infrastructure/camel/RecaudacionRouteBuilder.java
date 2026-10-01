@@ -1,56 +1,76 @@
 package org.canalesCMAC.infrastructure.camel;
 
+import java.util.EnumMap;
+import java.util.Locale;
+import java.util.Map;
+
 import org.apache.camel.builder.RouteBuilder;
-import org.canalesCMAC.adapter.out.electrosureste.ElseAdapter;
-import org.canalesCMAC.adapter.out.electroucayali.ElectroUcayaliAdapter;
-import org.canalesCMAC.adapter.out.seal.SealAdapter;
+import org.apache.camel.model.ChoiceDefinition;
+import org.canalesCMAC.application.ConvenioRegistro;
+import org.canalesCMAC.application.port.ConvenioAdapter;
 import org.canalesCMAC.domain.exception.InstitucionNoSoportadaException;
 import org.canalesCMAC.domain.model.Institucion;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
 import org.canalesCMAC.domain.model.RecaudacionRequest;
+
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 @ApplicationScoped
 public class RecaudacionRouteBuilder extends RouteBuilder {
 
     @Inject
-    ElseAdapter elseAdapter;
+    ConvenioRegistro registro;
 
     @Inject
-    ElectroUcayaliAdapter electroUcayaliAdapter;
+    Instance<ConvenioAdapter> adapters;
 
-    @Inject
-    SealAdapter sealAdapter;
+    @ConfigProperty(name = "recaudacion.reintentos", defaultValue = "0")
+    int reintentos;
+
+    @ConfigProperty(name = "recaudacion.reintentos.delay", defaultValue = "500")
+    long reintentosDelay;
 
     @Override
     public void configure() {
-        from("direct:recaudacion")
+        errorHandler(defaultErrorHandler()
+            .maximumRedeliveries(reintentos)
+            .redeliveryDelay(reintentosDelay)
+            .logExhausted(false));
+
+        Map<Institucion, ConvenioAdapter> porInstitucion = new EnumMap<>(Institucion.class);
+        for (ConvenioAdapter adaptador : adapters) {
+            porInstitucion.put(adaptador.institucion(), adaptador);
+        }
+
+        ChoiceDefinition choice = from("direct:recaudacion")
             .routeId("recaudacion.contentBasedRouter")
             .process(exchange -> {
                 RecaudacionRequest request = exchange.getMessage().getBody(RecaudacionRequest.class);
                 exchange.getMessage().setHeader("institucion", request.institucion().name());
             })
-            .choice()
-                .when(header("institucion").isEqualTo(Institucion.ELSE.name()))
-                    .to("direct:else")
-                .when(header("institucion").isEqualTo(Institucion.ELECTRO_UCAYALI.name()))
-                    .to("direct:electroucayali")
-                .when(header("institucion").isEqualTo(Institucion.SEAL.name()))
-                    .to("direct:seal")
-                .otherwise()
-                    .throwException(new InstitucionNoSoportadaException("Institución no soportada"))
+            .choice();
+
+        for (Institucion institucion : registro.instituciones()) {
+            if (porInstitucion.containsKey(institucion)) {
+                choice.when(header("institucion").isEqualTo(institucion.name()))
+                    .to(registro.ruta(institucion));
+            }
+        }
+
+        choice.otherwise()
+            .throwException(new InstitucionNoSoportadaException("Institución no soportada"))
             .end();
 
-        from("direct:else")
-            .routeId("recaudacion.electrosureste.soap")
-            .bean(elseAdapter, "procesar");
-
-        from("direct:electroucayali")
-            .routeId("recaudacion.electroucayali.rest")
-            .bean(electroUcayaliAdapter, "procesar");
-
-        from("direct:seal")
-            .routeId("recaudacion.seal.iso8583")
-            .bean(sealAdapter, "procesar");
+        for (Institucion institucion : registro.instituciones()) {
+            ConvenioAdapter adaptador = porInstitucion.get(institucion);
+            if (adaptador == null) {
+                continue;
+            }
+            from(registro.ruta(institucion))
+                .routeId("recaudacion." + institucion.name().toLowerCase(Locale.ROOT) + "." + registro.protocolo(institucion))
+                .bean(adaptador, "procesar");
+        }
     }
 }
