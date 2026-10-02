@@ -23,7 +23,30 @@ public class RecaudacionResolver {
                     Operador.EXTORNO_PAGO_AUTO, Operador.EXTORNO_AUTO),
             Institucion.SEAL,
             EnumSet.of(Operador.CONSULTA_DEUDA, Operador.PAGO_DEUDA,
-                    Operador.EXTORNO_PAGO, Operador.ANULACION));
+                    Operador.EXTORNO_PAGO, Operador.ANULACION)
+            ,
+
+            Institucion.CLARO,
+            EnumSet.of(
+                Operador.PAGO_DEUDA
+            ),
+
+            Institucion.UNIVCUSCO,
+            EnumSet.of(
+                Operador.CONSULTA_DEUDA
+            ),
+            
+            Institucion.YAGANASTE,
+            EnumSet.of(
+                Operador.CONSULTA,
+                Operador.SALDO
+            ),
+
+            Institucion.MUNICIPALIDAD_CUSCO,
+            EnumSet.of(
+                Operador.CONSULTA_DEUDA
+            )
+            );
 
     public void validar(Institucion institucion, Operador operador) {
         Set<Operador> soportados = OPERADORES_POR_INSTITUCION.get(institucion);
