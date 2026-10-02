@@ -3,6 +3,7 @@ package org.canalesCMAC.adapter.out.electrosureste;
 import java.math.BigDecimal;
 import java.util.Map;
 
+import org.canalesCMAC.application.port.RespuestaCruda;
 import org.canalesCMAC.domain.model.Institucion;
 import org.canalesCMAC.domain.model.Operador;
 import org.canalesCMAC.domain.model.RecaudacionRequest;
@@ -25,7 +26,7 @@ class ElseSoapMessageCodecTest {
     void serializaConsultaDeudaComoSoap() {
         RecaudacionRequest peticion = new RecaudacionRequest(Institucion.ELSE, Operador.CONSULTA_DEUDA,
             Map.of("datoConsulta", "0010681504", "tipoConsulta", "1"));
-        String soap = codec.serializar(peticion);
+        String soap = codec.construir(peticion).contenido();
         assertTrue(soap.contains("ConsultaDeuda"));
         assertTrue(soap.contains("<els:DatoConsulta>0010681504</els:DatoConsulta>"));
         assertTrue(soap.contains("<els:TipoConsulta>1</els:TipoConsulta>"));
@@ -46,7 +47,7 @@ class ElseSoapMessageCodecTest {
             "<MontoAPagarConsulta>23.10</MontoAPagarConsulta>" +
             "<FechaVencimiento>2018-03-27T00:00:00</FechaVencimiento>" +
             "</ConsultaDeudaResponse></soap:Body></soap:Envelope>";
-        RecaudacionResponse respuesta = codec.deserializar(soap,
+        RecaudacionResponse respuesta = codec.interpretar(new RespuestaCruda(200, soap),
             new RecaudacionRequest(Institucion.ELSE, Operador.CONSULTA_DEUDA, Map.of()));
         assertEquals("00", respuesta.codigo());
         assertEquals("CORRECTO", respuesta.mensaje());

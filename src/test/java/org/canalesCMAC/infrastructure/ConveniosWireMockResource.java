@@ -36,10 +36,10 @@ public class ConveniosWireMockResource implements QuarkusTestResourceLifecycleMa
         configurarSeal();
 
         Map<String, String> propiedades = new HashMap<>();
-        propiedades.put("recaudacion.electrosureste.url",
+        propiedades.put("convenio.ELSE.url",
             "http://localhost:" + elseServer.port() + "/wApiCobranzaLinea/SCobranza.svc");
-        propiedades.put("recaudacion.electroucayali.url", "http://localhost:" + euServer.port());
-        propiedades.put("recaudacion.seal.url", "http://localhost:" + sealServer.port() + "/seal");
+        propiedades.put("convenio.ELECTRO_UCAYALI.url", "http://localhost:" + euServer.port());
+        propiedades.put("convenio.SEAL.url", "http://localhost:" + sealServer.port() + "/seal");
         return propiedades;
     }
 
@@ -128,7 +128,7 @@ public class ConveniosWireMockResource implements QuarkusTestResourceLifecycleMa
             .willReturn(okJson("{\"codigo\":\"00\",\"mensaje\":\"CORRECTO\",\"nroSumin\":\"800006812\","
                 + "\"numFactura\":\"201800100000\",\"numOperacionEmpresa\":\"654321\"}")));
         euServer.stubFor(post(urlPathEqualTo("/api/v1/electro/extorno"))
-            .willReturn(okJson("{\"codigo\":\"00\",\"mensaje\":\"CORRECTO\"}")));
+            .willReturn(aResponse().withStatus(500).withBody("falla simulada")));
         euServer.stubFor(post(urlPathEqualTo("/api/v1/electro/extorno_automatico_pago"))
             .willReturn(okJson("{\"codigo\":\"00\",\"mensaje\":\"CORRECTO\"}")));
         euServer.stubFor(post(urlPathEqualTo("/api/v1/electro/extorno_automatico"))

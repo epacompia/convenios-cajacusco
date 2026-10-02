@@ -21,10 +21,17 @@ public class RecaudacionUseCaseImpl implements RecaudacionUseCase {
 
     @Override
     public RecaudacionResponse procesar(RecaudacionRequest solicitud) {
+        long inicio = System.nanoTime();
+        LOG.debugf("inicio de recaudacion institucion=%s operador=%s",
+            solicitud.institucion(), solicitud.operador());
         resolver.validar(solicitud.institucion(), solicitud.operador());
         RecaudacionResponse respuesta = canal.ejecutar(solicitud);
-        LOG.infof("recaudacion institucion=%s operador=%s codigo=%s",
-            solicitud.institucion(), solicitud.operador(), respuesta.codigo());
+        LOG.infof("recaudacion completada institucion=%s operador=%s codigo=%s duracionMs=%d",
+            solicitud.institucion(), solicitud.operador(), respuesta.codigo(), milisegundos(inicio));
         return respuesta;
+    }
+
+    private static long milisegundos(long inicioNanos) {
+        return (System.nanoTime() - inicioNanos) / 1_000_000L;
     }
 }

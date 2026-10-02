@@ -118,6 +118,19 @@ class OperacionesE2eTest {
     }
 
     @Test
+    void electroUcayaliErrorDelProveedorDevuelve502() {
+        given()
+            .contentType(ContentType.JSON)
+            .body("{\"institucion\":\"ELECTRO_UCAYALI\",\"operador\":\"EXTORNO_PAGO\",\"datos\":{"
+                + "\"numeroSuministro\":\"800006812\",\"numeroComprobante\":\"201800100000\","
+                + "\"monto\":\"19423.00\"}}")
+            .when().post("/api/v1/operaciones")
+            .then()
+            .statusCode(502)
+            .body("codigo", is("ER"));
+    }
+
+    @Test
     void electroUcayaliExtornoAutomaticoFlujoCompleto() {
         given()
             .contentType(ContentType.JSON)
