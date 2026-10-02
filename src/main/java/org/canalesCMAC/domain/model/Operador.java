@@ -7,5 +7,7 @@ public enum Operador {
     EXTORNO_PAGO,
     EXTORNO_PAGO_AUTO,
     EXTORNO_AUTO,
-    ANULACION
+    ANULACION,
+    CONSULTA,
+    SALDO
 }
