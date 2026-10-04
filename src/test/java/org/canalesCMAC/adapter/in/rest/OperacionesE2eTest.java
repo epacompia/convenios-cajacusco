@@ -142,4 +142,70 @@ class OperacionesE2eTest {
             .statusCode(200)
             .body("codigo", is("00"));
     }
+
+    @Test
+    void claroPagoDeudaFlujoCompleto() {
+        given()
+            .contentType(ContentType.JSON)
+            .body("{\"institucion\":\"CLARO\",\"operador\":\"PAGO_DEUDA\",\"datos\":{\"monto\":\"10.00\"}}")
+            .when().post("/api/v1/operaciones")
+            .then()
+            .statusCode(200)
+            .body("institucion", is("CLARO"))
+            .body("codigo", is("00"));
+    }
+
+    @Test
+    void universidadCuscoConsultaDeudaFlujoCompleto() {
+        given()
+            .contentType(ContentType.JSON)
+            .body("{\"institucion\":\"UNIVCUSCO\",\"operador\":\"CONSULTA_DEUDA\",\"datos\":{"
+                + "\"numeroReferencialDeuda\":\"123456\"}}")
+            .when().post("/api/v1/operaciones")
+            .then()
+            .statusCode(200)
+            .body("institucion", is("UNIVCUSCO"))
+            .body("codigo", is("00"));
+    }
+
+    @Test
+    void yaGanasteConsultaFlujoCompleto() {
+        given()
+            .contentType(ContentType.JSON)
+            .body("{\"institucion\":\"YAGANASTE\",\"operador\":\"CONSULTA\",\"datos\":{"
+                + "\"tpv\":\"1\",\"referenciaOperacion\":\"REF-1\"}}")
+            .when().post("/api/v1/operaciones")
+            .then()
+            .statusCode(200)
+            .body("institucion", is("YAGANASTE"))
+            .body("codigo", is("00"));
+    }
+
+    @Test
+    void municipalidadCuscoConsultaDeudaFlujoCompleto() {
+        given()
+            .contentType(ContentType.JSON)
+            .body("{\"institucion\":\"MUNICIPALIDAD_CUSCO\",\"operador\":\"CONSULTA_DEUDA\",\"datos\":{"
+                + "\"ordenpago\":\"123\"}}")
+            .when().post("/api/v1/operaciones")
+            .then()
+            .statusCode(200)
+            .body("institucion", is("MUNICIPALIDAD_CUSCO"))
+            .body("codigo", is("00"))
+            .body("mensaje", is("OK"));
+    }
+
+    @Test
+    void payToPeruConsultaPagoFlujoCompleto() {
+        given()
+            .contentType(ContentType.JSON)
+            .body("{\"institucion\":\"PAYTOPERU\",\"operador\":\"CONSULTA_PAGO\",\"datos\":{"
+                + "\"ncodigo_pago\":123,\"cnro_documento\":\"12345678\"}}")
+            .when().post("/api/v1/operaciones")
+            .then()
+            .statusCode(200)
+            .body("institucion", is("PAYTOPERU"))
+            .body("codigo", is("00"))
+            .body("datos.cnombres", is("JUAN"));
+    }
 }
