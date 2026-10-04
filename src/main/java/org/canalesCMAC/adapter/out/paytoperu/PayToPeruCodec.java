@@ -9,16 +9,30 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.enterprise.context.ApplicationScoped;
 
+import org.canalesCMAC.application.port.MapeadorOperacion;
+import org.canalesCMAC.application.port.PeticionSalida;
+import org.canalesCMAC.application.port.RespuestaCruda;
 import org.canalesCMAC.domain.model.Institucion;
 import org.canalesCMAC.domain.model.RecaudacionRequest;
 import org.canalesCMAC.domain.model.RecaudacionResponse;
+import org.jboss.logging.Logger;
 
 @ApplicationScoped
-public class PayToPeruCodec {
+public class PayToPeruCodec implements MapeadorOperacion {
+
+private static final Logger LOG = Logger.getLogger(PayToPeruCodec.class);
+private static final String CONTENT_TYPE = "application/json";
 
 private final ObjectMapper objectMapper = new ObjectMapper();
 
-public String serializar(RecaudacionRequest peticion) {
+@Override
+public Institucion institucion() {
+    return Institucion.PAYTOPERU;
+}
+
+@Override
+public PeticionSalida construir(RecaudacionRequest peticion) {
+    LOG.debugf("construyendo REST PAYTOPERU operador=%s", peticion.operador());
 
     Map<String, Object> request = new LinkedHashMap<>();
 
@@ -33,7 +47,7 @@ public String serializar(RecaudacionRequest peticion) {
     );
 
     try {
-        return objectMapper.writeValueAsString(request);
+        return new PeticionSalida(objectMapper.writeValueAsString(request), CONTENT_TYPE);
     } catch (JsonProcessingException e) {
         throw new IllegalStateException(
             "Error serializando request de PayToPeru",
@@ -42,12 +56,13 @@ public String serializar(RecaudacionRequest peticion) {
     }
 }
 
-public RecaudacionResponse deserializar(
-    String json,
+@Override
+public RecaudacionResponse interpretar(
+    RespuestaCruda respuesta,
     RecaudacionRequest peticion) {
 
     try {
-        JsonNode root = objectMapper.readTree(json);
+        JsonNode root = objectMapper.readTree(respuesta.cuerpo());
 
         String codigoRespuesta =
             root.path("berror").asBoolean()

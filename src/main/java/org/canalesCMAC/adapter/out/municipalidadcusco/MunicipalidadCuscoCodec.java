@@ -10,16 +10,30 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.enterprise.context.ApplicationScoped;
 
+import org.canalesCMAC.application.port.MapeadorOperacion;
+import org.canalesCMAC.application.port.PeticionSalida;
+import org.canalesCMAC.application.port.RespuestaCruda;
 import org.canalesCMAC.domain.model.Institucion;
 import org.canalesCMAC.domain.model.RecaudacionRequest;
 import org.canalesCMAC.domain.model.RecaudacionResponse;
+import org.jboss.logging.Logger;
 
 @ApplicationScoped
-public class MunicipalidadCuscoCodec {
+public class MunicipalidadCuscoCodec implements MapeadorOperacion {
+
+private static final Logger LOG = Logger.getLogger(MunicipalidadCuscoCodec.class);
+private static final String CONTENT_TYPE = "application/json";
 
 private final ObjectMapper objectMapper = new ObjectMapper();
 
-public String serializar(RecaudacionRequest peticion) {
+@Override
+public Institucion institucion() {
+    return Institucion.MUNICIPALIDAD_CUSCO;
+}
+
+@Override
+public PeticionSalida construir(RecaudacionRequest peticion) {
+    LOG.debugf("construyendo REST MUNICIPALIDAD_CUSCO operador=%s", peticion.operador());
 
     Map<String, Object> request = Map.of(
         "ordenpago",
@@ -27,7 +41,7 @@ public String serializar(RecaudacionRequest peticion) {
     );
 
     try {
-        return objectMapper.writeValueAsString(request);
+        return new PeticionSalida(objectMapper.writeValueAsString(request), CONTENT_TYPE);
     } catch (JsonProcessingException e) {
         throw new IllegalStateException(
             "Error serializando request de recuperar orden de pago",
@@ -36,12 +50,13 @@ public String serializar(RecaudacionRequest peticion) {
     }
 }
 
-public RecaudacionResponse deserializar(
-    String json,
+@Override
+public RecaudacionResponse interpretar(
+    RespuestaCruda respuesta,
     RecaudacionRequest peticion) {
 
     try {
-        JsonNode root = objectMapper.readTree(json);
+        JsonNode root = objectMapper.readTree(respuesta.cuerpo());
 
         String status = root.path("status").asText();
         String message = root.path("message").asText();

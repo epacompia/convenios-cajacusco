@@ -6,20 +6,33 @@ import java.util.Map;
 
 import jakarta.enterprise.context.ApplicationScoped;
 
+import org.canalesCMAC.application.port.MapeadorOperacion;
+import org.canalesCMAC.application.port.PeticionSalida;
+import org.canalesCMAC.application.port.RespuestaCruda;
 import org.canalesCMAC.domain.model.Institucion;
 import org.canalesCMAC.domain.model.RecaudacionRequest;
 import org.canalesCMAC.domain.model.RecaudacionResponse;
+import org.jboss.logging.Logger;
 
 @ApplicationScoped
-public class YaGanasteSoapMessageCodec {
+public class YaGanasteSoapMessageCodec implements MapeadorOperacion {
+
+    private static final Logger LOG = Logger.getLogger(YaGanasteSoapMessageCodec.class);
+    private static final String CONTENT_TYPE = "text/xml; charset=utf-8";
 
     private static final String SOAP_NS =
         "http://schemas.xmlsoap.org/soap/envelope/";
 
     private static final String SIGMA_NS ="net.sigma.h2h.ws";
 
-    public String serializar(RecaudacionRequest peticion) {
+    @Override
+    public Institucion institucion() {
+        return Institucion.YAGANASTE;
+    }
 
+    @Override
+    public PeticionSalida construir(RecaudacionRequest peticion) {
+        LOG.debugf("construyendo SOAP YAGANASTE operador=%s", peticion.operador());
         Map<String, Object> campos = campos(peticion);
 
         StringBuilder xml = new StringBuilder();
@@ -50,7 +63,7 @@ public class YaGanasteSoapMessageCodec {
         xml.append("</net:echo>");
         xml.append("</soapenv:Body>");
         xml.append("</soapenv:Envelope>");
-        return xml.toString();
+        return new PeticionSalida(xml.toString(), CONTENT_TYPE);
     }
 
     private Map<String, Object> campos(RecaudacionRequest peticion) {
@@ -177,13 +190,13 @@ public class YaGanasteSoapMessageCodec {
             .replace("'", "&apos;");
     }
 
-    public RecaudacionResponse deserializar(
-        String xmlSoap,
+    @Override
+    public RecaudacionResponse interpretar(
+        RespuestaCruda respuesta,
         RecaudacionRequest peticion
     ) {
 
-        System.out.println("Respuesta SOAP Sigma:");
-        System.out.println(xmlSoap);
+        LOG.debugf("respuesta YAGANASTE operador=%s", peticion.operador());
 
         return new RecaudacionResponse(
             Institucion.YAGANASTE,

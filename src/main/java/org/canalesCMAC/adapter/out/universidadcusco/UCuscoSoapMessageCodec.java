@@ -5,12 +5,19 @@ import java.util.Map;
 
 import jakarta.enterprise.context.ApplicationScoped;
 
+import org.canalesCMAC.application.port.MapeadorOperacion;
+import org.canalesCMAC.application.port.PeticionSalida;
+import org.canalesCMAC.application.port.RespuestaCruda;
 import org.canalesCMAC.domain.model.Institucion;
 import org.canalesCMAC.domain.model.RecaudacionRequest;
 import org.canalesCMAC.domain.model.RecaudacionResponse;
+import org.jboss.logging.Logger;
 
 @ApplicationScoped
-public class UCuscoSoapMessageCodec {
+public class UCuscoSoapMessageCodec implements MapeadorOperacion {
+
+    private static final Logger LOG = Logger.getLogger(UCuscoSoapMessageCodec.class);
+    private static final String CONTENT_TYPE = "text/xml; charset=utf-8";
 
     private static final String SOAP_NS =
         "http://schemas.xmlsoap.org/soap/envelope/";
@@ -18,8 +25,14 @@ public class UCuscoSoapMessageCodec {
     private static final String UAC_NS =
         "http://www.uac.com.pe";
 
-    public String serializar(RecaudacionRequest peticion) {
+    @Override
+    public Institucion institucion() {
+        return Institucion.UNIVCUSCO;
+    }
 
+    @Override
+    public PeticionSalida construir(RecaudacionRequest peticion) {
+        LOG.debugf("construyendo SOAP UNIVCUSCO operador=%s", peticion.operador());
         Map<String, String> campos = campos(peticion);
 
         StringBuilder xml = new StringBuilder();
@@ -85,7 +98,7 @@ public class UCuscoSoapMessageCodec {
 
         xml.append("</soapenv:Envelope>");
 
-        return xml.toString();
+        return new PeticionSalida(xml.toString(), CONTENT_TYPE);
     }
 
     private Map<String, String> campos(
@@ -164,13 +177,13 @@ public class UCuscoSoapMessageCodec {
             .replace("'", "&apos;");
     }
 
-    public RecaudacionResponse deserializar(
-        String xmlSoap,
+    @Override
+    public RecaudacionResponse interpretar(
+        RespuestaCruda respuesta,
         RecaudacionRequest peticion
     ) {
 
-        System.out.println("Respuesta SOAP:");
-        System.out.println(xmlSoap);
+        LOG.debugf("respuesta UNIVCUSCO operador=%s", peticion.operador());
 
         return new RecaudacionResponse(
             Institucion.UNIVCUSCO,

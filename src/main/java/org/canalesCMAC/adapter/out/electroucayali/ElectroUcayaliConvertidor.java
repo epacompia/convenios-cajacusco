@@ -11,113 +11,59 @@ import java.util.Map;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import org.canalesCMAC.application.CatalogoCodigos;
+import org.canalesCMAC.application.port.MapeadorOperacion;
+import org.canalesCMAC.application.port.PeticionSalida;
+import org.canalesCMAC.application.port.RespuestaCruda;
 import org.canalesCMAC.domain.exception.OperadorNoSoportadoException;
 import org.canalesCMAC.domain.model.Canonico;
 import org.canalesCMAC.domain.model.Institucion;
 import org.canalesCMAC.domain.model.Operador;
 import org.canalesCMAC.domain.model.RecaudacionRequest;
 import org.canalesCMAC.domain.model.RecaudacionResponse;
+import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 @ApplicationScoped
-public class ElectroUcayaliConvertidor {
+public class ElectroUcayaliConvertidor implements MapeadorOperacion {
 
+    private static final Logger LOG = Logger.getLogger(ElectroUcayaliConvertidor.class);
+    private static final String CONTENT_TYPE = "application/json";
     private static final DateTimeFormatter FECHA_COMPACTA = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final DateTimeFormatter HORA_COMPACTA = DateTimeFormatter.ofPattern("HHmmss");
 
     @Inject
     ObjectMapper objectMapper;
 
+    @Inject
+    CatalogoCodigos catalogo;
+
     @ConfigProperty(name = "recaudacion.electroucayali.codempresa", defaultValue = "05")
     String codEmpresa;
 
-    public record Solicitud(String ruta, String cuerpo) {
+    @Override
+    public Institucion institucion() {
+        return Institucion.ELECTRO_UCAYALI;
     }
 
-    public Solicitud construir(RecaudacionRequest peticion) {
+    @Override
+    public PeticionSalida construir(RecaudacionRequest peticion) {
+        OperacionEu operacion = OperacionEu.de(peticion.operador());
+        LOG.debugf("construyendo REST Electro Ucayali operador=%s ruta=%s", peticion.operador(), operacion.ruta());
         Map<String, Object> cuerpo = new LinkedHashMap<>();
-        String ruta;
-        switch (peticion.operador()) {
-            case CONSULTA_DEUDA -> {
-                ruta = "/api/v2/electro/consulta";
-                cuerpo.put("nroSumin", dato(peticion, Canonico.NUMERO_SUMINISTRO));
-                cuerpo.put("traceConsulta", peticion.datos().getOrDefault(Canonico.TRACE_CONSULTA, "").toString());
-                cuerpo.put("fechaConsulta", FECHA_COMPACTA.format(fechaOperacion(peticion)));
-                cuerpo.put("horaConsulta", HORA_COMPACTA.format(fechaOperacion(peticion)));
-                cuerpo.put("codEmpresa", codEmpresa);
-                cuerpo.put("codServicio", "0");
-                cuerpo.put("codAgencia", "0");
-                cuerpo.put("codCanal", "00");
-                cuerpo.put("terminal", "0");
-            }
-            case PAGO_DEUDA -> {
-                ruta = "/api/v1/electro/pago";
-                cuerpo.put("nroSumin", dato(peticion, Canonico.NUMERO_SUMINISTRO));
-                cuerpo.put("numFactura", dato(peticion, Canonico.NUMERO_COMPROBANTE));
-                cuerpo.put("traceConsulta", peticion.datos().getOrDefault(Canonico.TRACE_CONSULTA, "").toString());
-                cuerpo.put("fechaPago", FECHA_COMPACTA.format(fechaOperacion(peticion)));
-                cuerpo.put("horaPago", HORA_COMPACTA.format(fechaOperacion(peticion)));
-                cuerpo.put("montoDeuda", monto(peticion));
-                cuerpo.put("codEmpresa", codEmpresa);
-                cuerpo.put("codServicio", "0");
-                cuerpo.put("codAgencia", "0");
-                cuerpo.put("codCanal", "00");
-                cuerpo.put("terminal", "0");
-            }
-            case EXTORNO_PAGO -> {
-                ruta = "/api/v1/electro/extorno";
-                cuerpo.put("nroSumin", dato(peticion, Canonico.NUMERO_SUMINISTRO));
-                cuerpo.put("numFactura", dato(peticion, Canonico.NUMERO_COMPROBANTE));
-                cuerpo.put("traceConsulta", peticion.datos().getOrDefault(Canonico.TRACE_CONSULTA, "").toString());
-                cuerpo.put("fechaPago", FECHA_COMPACTA.format(fechaOperacion(peticion)));
-                cuerpo.put("horaPago", HORA_COMPACTA.format(fechaOperacion(peticion)));
-                cuerpo.put("montoDeuda", monto(peticion));
-                cuerpo.put("codEmpresa", codEmpresa);
-                cuerpo.put("codServicio", "0");
-                cuerpo.put("codAgencia", "0");
-                cuerpo.put("codCanal", "00");
-                cuerpo.put("terminal", "0");
-            }
-            case EXTORNO_PAGO_AUTO -> {
-                ruta = "/api/v1/electro/extorno_automatico_pago";
-                cuerpo.put("nroSumin", dato(peticion, Canonico.NUMERO_SUMINISTRO));
-                cuerpo.put("numFactura", dato(peticion, Canonico.NUMERO_COMPROBANTE));
-                cuerpo.put("fechaPago", FECHA_COMPACTA.format(fechaOperacion(peticion)));
-                cuerpo.put("horaPago", HORA_COMPACTA.format(fechaOperacion(peticion)));
-                cuerpo.put("montoDeuda", monto(peticion));
-                cuerpo.put("codEmpresa", codEmpresa);
-                cuerpo.put("codServicio", "0");
-                cuerpo.put("codAgencia", "0");
-                cuerpo.put("codCanal", "00");
-                cuerpo.put("terminal", "0");
-            }
-            case EXTORNO_AUTO -> {
-                ruta = "/api/v1/electro/extorno_automatico";
-                cuerpo.put("nroSumin", dato(peticion, Canonico.NUMERO_SUMINISTRO));
-                cuerpo.put("numFactura", dato(peticion, Canonico.NUMERO_COMPROBANTE));
-                cuerpo.put("tracePago", peticion.datos().getOrDefault(Canonico.IDENTIFICADOR_PAGO, "").toString());
-                cuerpo.put("fechaPago", FECHA_COMPACTA.format(fechaOperacion(peticion)));
-                cuerpo.put("horaPago", HORA_COMPACTA.format(fechaOperacion(peticion)));
-                cuerpo.put("montoDeuda", monto(peticion));
-                cuerpo.put("codEmpresa", codEmpresa);
-                cuerpo.put("codServicio", "0");
-                cuerpo.put("codAgencia", "0");
-                cuerpo.put("codCanal", "00");
-                cuerpo.put("terminal", "0");
-            }
-            default -> throw new OperadorNoSoportadoException("Operador " + peticion.operador() + " no soportado por Electro Ucayali");
-        }
-        return new Solicitud(ruta, jsonDe(cuerpo));
+        operacion.cuerpo(cuerpo, peticion, codEmpresa);
+        return new PeticionSalida(jsonDe(cuerpo), operacion.ruta(), CONTENT_TYPE);
     }
 
-    public RecaudacionResponse interpretar(String json, RecaudacionRequest peticion) {
+    @Override
+    public RecaudacionResponse interpretar(RespuestaCruda respuesta, RecaudacionRequest peticion) {
         try {
-            JsonNode nodo = objectMapper.readTree(json);
+            JsonNode nodo = objectMapper.readTree(respuesta.cuerpo());
             String codigo = nodo.path("codigo").asText("99");
-            String mensaje = nodo.path("mensaje").asText("");
+            String mensaje = catalogo.mensaje(Institucion.ELECTRO_UCAYALI, codigo, nodo.path("mensaje").asText(""));
             Map<String, Object> datos = new LinkedHashMap<>();
             extraerSiExiste(nodo, datos, "nroSumin", Canonico.NUMERO_SUMINISTRO);
             extraerSiExiste(nodo, datos, "nombreCliente", Canonico.NOMBRE_CLIENTE);
@@ -139,6 +85,7 @@ public class ElectroUcayaliConvertidor {
                 }
                 datos.put(Canonico.LISTA_DEUDAS, deudas);
             }
+            LOG.debugf("REST Electro Ucayali interpretado operador=%s codigo=%s", peticion.operador(), codigo);
             return new RecaudacionResponse(Institucion.ELECTRO_UCAYALI, peticion.operador(), codigo, mensaje, datos);
         } catch (Exception e) {
             throw new IllegalArgumentException("Respuesta JSON no válida: " + e.getMessage(), e);
@@ -153,7 +100,7 @@ public class ElectroUcayaliConvertidor {
         }
     }
 
-    private LocalDateTime fechaOperacion(RecaudacionRequest peticion) {
+    private static LocalDateTime fechaOperacion(RecaudacionRequest peticion) {
         Object valor = peticion.datos().get(Canonico.FECHA_OPERACION);
         if (valor != null && !valor.toString().isBlank()) {
             return LocalDateTime.parse(valor.toString(), DateTimeFormatter.ISO_LOCAL_DATE_TIME);
@@ -161,7 +108,7 @@ public class ElectroUcayaliConvertidor {
         return LocalDateTime.now();
     }
 
-    private String dato(RecaudacionRequest peticion, String clave) {
+    private static String dato(RecaudacionRequest peticion, String clave) {
         Object valor = peticion.datos().get(clave);
         if (valor == null || valor.toString().isBlank()) {
             throw new IllegalArgumentException("Campo canónico obligatorio ausente: " + clave);
@@ -169,7 +116,7 @@ public class ElectroUcayaliConvertidor {
         return valor.toString();
     }
 
-    private BigDecimal monto(RecaudacionRequest peticion) {
+    private static BigDecimal monto(RecaudacionRequest peticion) {
         Object monto = peticion.datos().get(Canonico.MONTO);
         if (monto == null) {
             throw new IllegalArgumentException("Campo canónico obligatorio ausente: monto");
@@ -177,9 +124,115 @@ public class ElectroUcayaliConvertidor {
         return new BigDecimal(monto.toString()).setScale(2);
     }
 
-    private void extraerSiExiste(JsonNode nodo, Map<String, Object> destino, String origen, String destinoClave) {
+    private static void extraerSiExiste(JsonNode nodo, Map<String, Object> destino, String origen, String destinoClave) {
         if (nodo.hasNonNull(origen) && !nodo.get(origen).asText().isBlank()) {
             destino.put(destinoClave, nodo.get(origen).asText());
+        }
+    }
+
+    private enum OperacionEu {
+        CONSULTA_DEUDA {
+            @Override
+            String ruta() {
+                return "/api/v2/electro/consulta";
+            }
+
+            @Override
+            void cuerpo(Map<String, Object> c, RecaudacionRequest p, String codEmpresa) {
+                c.put("nroSumin", dato(p, Canonico.NUMERO_SUMINISTRO));
+                c.put("traceConsulta", p.datos().getOrDefault(Canonico.TRACE_CONSULTA, "").toString());
+                c.put("fechaConsulta", FECHA_COMPACTA.format(fechaOperacion(p)));
+                c.put("horaConsulta", HORA_COMPACTA.format(fechaOperacion(p)));
+                comunes(c, codEmpresa);
+            }
+        },
+        PAGO_DEUDA {
+            @Override
+            String ruta() {
+                return "/api/v1/electro/pago";
+            }
+
+            @Override
+            void cuerpo(Map<String, Object> c, RecaudacionRequest p, String codEmpresa) {
+                c.put("nroSumin", dato(p, Canonico.NUMERO_SUMINISTRO));
+                c.put("numFactura", dato(p, Canonico.NUMERO_COMPROBANTE));
+                c.put("traceConsulta", p.datos().getOrDefault(Canonico.TRACE_CONSULTA, "").toString());
+                c.put("fechaPago", FECHA_COMPACTA.format(fechaOperacion(p)));
+                c.put("horaPago", HORA_COMPACTA.format(fechaOperacion(p)));
+                c.put("montoDeuda", monto(p));
+                comunes(c, codEmpresa);
+            }
+        },
+        EXTORNO_PAGO {
+            @Override
+            String ruta() {
+                return "/api/v1/electro/extorno";
+            }
+
+            @Override
+            void cuerpo(Map<String, Object> c, RecaudacionRequest p, String codEmpresa) {
+                c.put("nroSumin", dato(p, Canonico.NUMERO_SUMINISTRO));
+                c.put("numFactura", dato(p, Canonico.NUMERO_COMPROBANTE));
+                c.put("traceConsulta", p.datos().getOrDefault(Canonico.TRACE_CONSULTA, "").toString());
+                c.put("fechaPago", FECHA_COMPACTA.format(fechaOperacion(p)));
+                c.put("horaPago", HORA_COMPACTA.format(fechaOperacion(p)));
+                c.put("montoDeuda", monto(p));
+                comunes(c, codEmpresa);
+            }
+        },
+        EXTORNO_PAGO_AUTO {
+            @Override
+            String ruta() {
+                return "/api/v1/electro/extorno_automatico_pago";
+            }
+
+            @Override
+            void cuerpo(Map<String, Object> c, RecaudacionRequest p, String codEmpresa) {
+                c.put("nroSumin", dato(p, Canonico.NUMERO_SUMINISTRO));
+                c.put("numFactura", dato(p, Canonico.NUMERO_COMPROBANTE));
+                c.put("fechaPago", FECHA_COMPACTA.format(fechaOperacion(p)));
+                c.put("horaPago", HORA_COMPACTA.format(fechaOperacion(p)));
+                c.put("montoDeuda", monto(p));
+                comunes(c, codEmpresa);
+            }
+        },
+        EXTORNO_AUTO {
+            @Override
+            String ruta() {
+                return "/api/v1/electro/extorno_automatico";
+            }
+
+            @Override
+            void cuerpo(Map<String, Object> c, RecaudacionRequest p, String codEmpresa) {
+                c.put("nroSumin", dato(p, Canonico.NUMERO_SUMINISTRO));
+                c.put("numFactura", dato(p, Canonico.NUMERO_COMPROBANTE));
+                c.put("tracePago", p.datos().getOrDefault(Canonico.IDENTIFICADOR_PAGO, "").toString());
+                c.put("fechaPago", FECHA_COMPACTA.format(fechaOperacion(p)));
+                c.put("horaPago", HORA_COMPACTA.format(fechaOperacion(p)));
+                c.put("montoDeuda", monto(p));
+                comunes(c, codEmpresa);
+            }
+        };
+
+        abstract String ruta();
+
+        abstract void cuerpo(Map<String, Object> cuerpo, RecaudacionRequest peticion, String codEmpresa);
+
+        static OperacionEu de(Operador operador) {
+            for (OperacionEu operacion : values()) {
+                if (operacion.name().equals(operador.name())) {
+                    return operacion;
+                }
+            }
+            throw new OperadorNoSoportadoException("Operador " + operador + " no soportado por Electro Ucayali");
+        }
+
+        private static void comunes(Map<String, Object> c, String codEmpresa) {
+            c.put("codEmpresa", codEmpresa);
+            c.put("codServicio", "0");
+            c.put("codAgencia", "0");
+            c.put("codCanal", "00");
+            c.put("terminal", "0");
         }
     }
 }

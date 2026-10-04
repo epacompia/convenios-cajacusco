@@ -20,4 +20,15 @@ class OperacionesResourceTest {
             .statusCode(400)
             .body("codigo", is("ER"));
     }
+
+    @Test
+    void rechazaPagoConCamposObligatoriosAusentes() {
+        given()
+            .contentType(ContentType.JSON)
+            .body("{\"institucion\":\"ELSE\",\"operador\":\"PAGO_DEUDA\",\"datos\":{}}")
+            .when().post("/api/v1/operaciones")
+            .then()
+            .statusCode(400)
+            .body("codigo", is("ER"));
+    }
 }

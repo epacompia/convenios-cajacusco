@@ -8,19 +8,26 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
-import org.canalesCMAC.domain.exception.OperadorNoSoportadoException;
+import org.canalesCMAC.application.CatalogoCodigos;
+import org.canalesCMAC.application.CatalogoOperaciones;
+import org.canalesCMAC.application.port.MapeadorOperacion;
+import org.canalesCMAC.application.port.PeticionSalida;
+import org.canalesCMAC.application.port.RespuestaCruda;
 import org.canalesCMAC.domain.model.Canonico;
 import org.canalesCMAC.domain.model.Institucion;
 import org.canalesCMAC.domain.model.Operador;
 import org.canalesCMAC.domain.model.RecaudacionRequest;
 import org.canalesCMAC.domain.model.RecaudacionResponse;
+import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 @ApplicationScoped
-public class SealIso8583Codec {
+public class SealIso8583Codec implements MapeadorOperacion {
 
+    private static final Logger LOG = Logger.getLogger(SealIso8583Codec.class);
     private static final DateTimeFormatter FECHA = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final DateTimeFormatter HORA = DateTimeFormatter.ofPattern("HHmmss");
     private static final String HEX = "0123456789ABCDEF";
@@ -52,14 +59,26 @@ public class SealIso8583Codec {
     @ConfigProperty(name = "recaudacion.seal.direccion", defaultValue = "")
     String direccion;
 
-    public String construir(RecaudacionRequest peticion) {
-        Operacion operacion = Operacion.de(peticion.operador());
+    @Inject
+    CatalogoCodigos catalogo;
+
+    @Inject
+    CatalogoOperaciones catalogoOperaciones;
+
+    @Override
+    public Institucion institucion() {
+        return Institucion.SEAL;
+    }
+
+    @Override
+    public PeticionSalida construir(RecaudacionRequest peticion) {
+        CatalogoOperaciones.OperacionSpec operacion = catalogoOperaciones.operacion(Institucion.SEAL, peticion.operador());
         LocalDateTime fecha = fechaOperacion(peticion);
         String trace = trace(peticion);
         Map<Integer, String> campos = new LinkedHashMap<>();
         campos.put(2, padLeft("", 19));
-        campos.put(3, operacion.processingCode);
-        campos.put(4, operacion.conMonto ? monto(peticion) : padLeft("", 12));
+        campos.put(3, operacion.processingCode());
+        campos.put(4, operacion.conMonto() ? monto(peticion) : padLeft("", 12));
         campos.put(11, trace);
         campos.put(12, HORA.format(fecha));
         campos.put(13, FECHA.format(fecha));
@@ -68,7 +87,7 @@ public class SealIso8583Codec {
         campos.put(32, padLeft(acquirer, 8));
         campos.put(33, padLeft(forward, 8));
         campos.put(37, padLeft(trace, 12));
-        if (operacion.requiereAprobacion) {
+        if (operacion.requiereAprobacion()) {
             campos.put(38, padLeft(aprobacion(peticion), 6));
         }
         campos.put(41, padLeft(car, 8));
@@ -76,16 +95,19 @@ public class SealIso8583Codec {
         campos.put(43, padRight(direccion, 40));
         campos.put(49, padLeft(moneda, 3));
         campos.put(121, campo121(peticion));
-        return ensamblar(operacion.mti, campos);
+        LOG.debugf("construyendo ISO8583 SEAL operador=%s mti=%s processingCode=%s",
+            peticion.operador(), operacion.mti(), operacion.processingCode());
+        return new PeticionSalida(ensamblar(operacion.mti(), campos), "text/plain; charset=ISO-8859-1");
     }
 
-    public RecaudacionResponse interpretar(String trama, RecaudacionRequest peticion) {
-        Map<Integer, String> campos = parsear(trama);
+    @Override
+    public RecaudacionResponse interpretar(RespuestaCruda respuesta, RecaudacionRequest peticion) {
+        Map<Integer, String> campos = parsear(respuesta.cuerpo());
         String codigo = campos.get(39);
         if (codigo == null || codigo.isBlank()) {
             codigo = "99";
         }
-        String mensaje = mensaje(codigo);
+        String mensaje = catalogo.mensaje(Institucion.SEAL, codigo, "");
         Map<String, Object> datos = new LinkedHashMap<>();
         if ("00".equals(codigo)) {
             Map<String, String> privados = subcampos(campos.get(121));
@@ -100,6 +122,7 @@ public class SealIso8583Codec {
                 poner(datos, Canonico.MONTO, decimal(campos.get(4)));
             }
         }
+        LOG.debugf("ISO8583 SEAL interpretado operador=%s codigo=%s", peticion.operador(), codigo);
         return new RecaudacionResponse(Institucion.SEAL, peticion.operador(), codigo, mensaje, datos);
     }
 
@@ -267,16 +290,6 @@ public class SealIso8583Codec {
         return LocalDateTime.now();
     }
 
-    private String mensaje(String codigo) {
-        return switch (codigo) {
-            case "00" -> "TRANSACCION CORRECTA";
-            case "06" -> "FORMATO DE MENSAJE INVALIDO";
-            case "07" -> "CONTRATO NO ESTA DISPONIBLE PARA SER PAGADO";
-            case "20" -> "SIN PAGO PARA EXTORNAR";
-            default -> "";
-        };
-    }
-
     private BigDecimal decimal(String valor) {
         return valor == null || valor.isBlank() ? null : new BigDecimal(valor).movePointLeft(2);
     }
@@ -305,35 +318,5 @@ public class SealIso8583Codec {
             return v.substring(0, longitud);
         }
         return v + " ".repeat(longitud - v.length());
-    }
-
-    private enum Operacion {
-        CONSULTA(Operador.CONSULTA_DEUDA, "0200", "310000", false, false),
-        PAGO(Operador.PAGO_DEUDA, "0200", "210000", true, false),
-        ANULACION(Operador.ANULACION, "0200", "220000", false, true),
-        EXTORNO(Operador.EXTORNO_PAGO, "0400", "210000", false, false);
-
-        private final Operador operador;
-        private final String mti;
-        private final String processingCode;
-        private final boolean conMonto;
-        private final boolean requiereAprobacion;
-
-        Operacion(Operador operador, String mti, String processingCode, boolean conMonto, boolean requiereAprobacion) {
-            this.operador = operador;
-            this.mti = mti;
-            this.processingCode = processingCode;
-            this.conMonto = conMonto;
-            this.requiereAprobacion = requiereAprobacion;
-        }
-
-        private static Operacion de(Operador operador) {
-            for (Operacion operacion : values()) {
-                if (operacion.operador == operador) {
-                    return operacion;
-                }
-            }
-            throw new OperadorNoSoportadoException("Operador " + operador + " no soportado por SEAL");
-        }
     }
 }

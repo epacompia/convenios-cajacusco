@@ -6,17 +6,24 @@ import java.util.Map;
 
 import jakarta.enterprise.context.ApplicationScoped;
 
+import org.canalesCMAC.application.port.MapeadorOperacion;
+import org.canalesCMAC.application.port.PeticionSalida;
+import org.canalesCMAC.application.port.RespuestaCruda;
 import org.canalesCMAC.domain.model.Canonico;
 import org.canalesCMAC.domain.model.Institucion;
 import org.canalesCMAC.domain.model.RecaudacionRequest;
 import org.canalesCMAC.domain.model.RecaudacionResponse;
+import org.jboss.logging.Logger;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 
 @ApplicationScoped
-public class ClaroSoapMessageCodec {
+public class ClaroSoapMessageCodec implements MapeadorOperacion {
+
+    private static final Logger LOG = Logger.getLogger(ClaroSoapMessageCodec.class);
+    private static final String CONTENT_TYPE = "text/xml; charset=utf-8";
 
     private static final String SOAP_NS =
         "http://schemas.xmlsoap.org/soap/envelope/";
@@ -27,8 +34,14 @@ public class ClaroSoapMessageCodec {
     private static final String XSD_NS =
         "http://entidades.interfazST.webservice.novatronic.com/xsd";
 
-    public String serializar(RecaudacionRequest peticion) {
+    @Override
+    public Institucion institucion() {
+        return Institucion.CLARO;
+    }
 
+    @Override
+    public PeticionSalida construir(RecaudacionRequest peticion) {
+        LOG.debugf("construyendo SOAP CLARO operador=%s", peticion.operador());
         Map<String, String> campos = campos(peticion);
         StringBuilder xml = new StringBuilder();
 
@@ -57,7 +70,7 @@ public class ClaroSoapMessageCodec {
         xml.append("</soapenv:Body>");
         xml.append("</soapenv:Envelope>");
 
-        return xml.toString();
+        return new PeticionSalida(xml.toString(), CONTENT_TYPE);
     }
 
     private Map<String, String> campos(RecaudacionRequest peticion) {
@@ -127,16 +140,13 @@ public class ClaroSoapMessageCodec {
             .replace("'", "&apos;");
     }
 
-    public RecaudacionResponse deserializar(
-    String xmlSoap,
-    RecaudacionRequest peticion) {
-        //System.out.println("Respuesta SOAP:");
-        //System.out.println(xmlSoap);
+    @Override
+    public RecaudacionResponse interpretar(RespuestaCruda respuesta, RecaudacionRequest peticion) {
         XmlMapper xmlMapper = new XmlMapper();
         String codigoRespuesta = "";
         String codigoAutorizacion = "";
         try {
-            JsonNode root = xmlMapper.readTree(xmlSoap);
+            JsonNode root = xmlMapper.readTree(respuesta.cuerpo());
             JsonNode returnNode = root
             .path("Body")
             .path("pagoResponse")
@@ -145,9 +155,9 @@ public class ClaroSoapMessageCodec {
                 returnNode.path("codigoRespuesta").asText();
             codigoAutorizacion =
                 returnNode.path("codigoAutorizacion").asText();
-            System.out.println("====>" + codigoRespuesta);
+            LOG.debugf("respuesta CLARO codigoRespuesta=%s", codigoRespuesta);
         } catch (JsonProcessingException e) {
-            e.printStackTrace();
+            LOG.errorf("respuesta CLARO inválida: %s", e.getMessage());
         }
 
         return new RecaudacionResponse(
