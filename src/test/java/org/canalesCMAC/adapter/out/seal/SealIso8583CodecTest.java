@@ -3,6 +3,7 @@ package org.canalesCMAC.adapter.out.seal;
 import java.math.BigDecimal;
 import java.util.Map;
 
+import org.canalesCMAC.application.port.RespuestaCruda;
 import org.canalesCMAC.domain.model.Institucion;
 import org.canalesCMAC.domain.model.Operador;
 import org.canalesCMAC.domain.model.RecaudacionRequest;
@@ -26,7 +27,7 @@ class SealIso8583CodecTest {
         RecaudacionRequest peticion = new RecaudacionRequest(Institucion.SEAL, Operador.CONSULTA_DEUDA,
             Map.of("contrato", "98787", "identificadorTransaccion", "369571",
                 "fechaOperacion", "2026-10-01T10:20:30"));
-        String trama = codec.construir(peticion);
+        String trama = codec.construir(peticion).contenido();
         assertTrue(trama.startsWith("0200F038048188E08000"));
         assertEquals("0000000000000080", trama.substring(20, 36));
         assertTrue(trama.contains("310000"));
@@ -40,7 +41,7 @@ class SealIso8583CodecTest {
     void construyeAnulacionConAprobacion() {
         RecaudacionRequest peticion = new RecaudacionRequest(Institucion.SEAL, Operador.ANULACION,
             Map.of("contrato", "98787", "codigoAprobacion", "00001"));
-        String trama = codec.construir(peticion);
+        String trama = codec.construir(peticion).contenido();
         assertTrue(trama.startsWith("0200F03804818CE08000"));
         assertTrue(trama.contains("220000"));
     }
@@ -49,14 +50,14 @@ class SealIso8583CodecTest {
     void construyeExtornoConMtiDeReversa() {
         RecaudacionRequest peticion = new RecaudacionRequest(Institucion.SEAL, Operador.EXTORNO_PAGO,
             Map.of("contrato", "98787"));
-        String trama = codec.construir(peticion);
+        String trama = codec.construir(peticion).contenido();
         assertTrue(trama.startsWith("0400F038048188E08000"));
         assertTrue(trama.contains("210000"));
     }
 
     @Test
     void interpretaConsultaExitosa() {
-        RecaudacionResponse respuesta = codec.interpretar(consultaResponse(),
+        RecaudacionResponse respuesta = codec.interpretar(new RespuestaCruda(200, consultaResponse()),
             new RecaudacionRequest(Institucion.SEAL, Operador.CONSULTA_DEUDA, Map.of()));
         assertEquals("00", respuesta.codigo());
         assertEquals("TRANSACCION CORRECTA", respuesta.mensaje());

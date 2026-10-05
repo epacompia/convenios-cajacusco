@@ -1,5 +1,10 @@
 package org.canalesCMAC.application;
 
+import java.util.EnumMap;
+import java.util.EnumSet;
+import java.util.Map;
+import java.util.Set;
+
 import org.canalesCMAC.domain.exception.OperadorNoSoportadoException;
 import org.canalesCMAC.domain.model.Institucion;
 import org.canalesCMAC.domain.model.Operador;
@@ -11,7 +16,19 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class RecaudacionResolverTest {
 
-    private final RecaudacionResolver resolver = new RecaudacionResolver();
+    private final RecaudacionResolver resolver = new RecaudacionResolver(registro());
+
+    private static ConvenioRegistro registro() {
+        Map<Institucion, Set<Operador>> operadores = new EnumMap<>(Institucion.class);
+        operadores.put(Institucion.ELSE,
+            EnumSet.of(Operador.CONSULTA_DEUDA, Operador.PAGO_DEUDA, Operador.CONSULTA_PAGO, Operador.EXTORNO_PAGO));
+        operadores.put(Institucion.ELECTRO_UCAYALI,
+            EnumSet.of(Operador.CONSULTA_DEUDA, Operador.PAGO_DEUDA, Operador.EXTORNO_PAGO,
+                Operador.EXTORNO_PAGO_AUTO, Operador.EXTORNO_AUTO));
+        operadores.put(Institucion.SEAL,
+            EnumSet.of(Operador.CONSULTA_DEUDA, Operador.PAGO_DEUDA, Operador.EXTORNO_PAGO, Operador.ANULACION));
+        return new ConvenioRegistro(operadores, Map.of());
+    }
 
     @Test
     void aceptaConsultaDeudaDeElse() {

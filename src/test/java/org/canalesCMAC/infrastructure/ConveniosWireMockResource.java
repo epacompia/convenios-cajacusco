@@ -22,38 +22,59 @@ public class ConveniosWireMockResource implements QuarkusTestResourceLifecycleMa
     private WireMockServer elseServer;
     private WireMockServer euServer;
     private WireMockServer sealServer;
+    private WireMockServer claroServer;
+    private WireMockServer ucuscoServer;
+    private WireMockServer yaganasteServer;
+    private WireMockServer muniCuscoServer;
+    private WireMockServer payToPeruServer;
 
     @Override
     public Map<String, String> start() {
-        elseServer = new WireMockServer(WireMockConfiguration.options().dynamicPort());
-        euServer = new WireMockServer(WireMockConfiguration.options().dynamicPort());
-        sealServer = new WireMockServer(WireMockConfiguration.options().dynamicPort());
-        elseServer.start();
-        euServer.start();
-        sealServer.start();
+        elseServer = servidor();
+        euServer = servidor();
+        sealServer = servidor();
+        claroServer = servidor();
+        ucuscoServer = servidor();
+        yaganasteServer = servidor();
+        muniCuscoServer = servidor();
+        payToPeruServer = servidor();
         configurarElse();
         configurarEu();
         configurarSeal();
+        configurarClaro();
+        configurarUCusco();
+        configurarYaGanaste();
+        configurarMuniCusco();
+        configurarPayToPeru();
 
         Map<String, String> propiedades = new HashMap<>();
-        propiedades.put("recaudacion.electrosureste.url",
+        propiedades.put("convenio.ELSE.url",
             "http://localhost:" + elseServer.port() + "/wApiCobranzaLinea/SCobranza.svc");
-        propiedades.put("recaudacion.electroucayali.url", "http://localhost:" + euServer.port());
-        propiedades.put("recaudacion.seal.url", "http://localhost:" + sealServer.port() + "/seal");
+        propiedades.put("convenio.ELECTRO_UCAYALI.url", "http://localhost:" + euServer.port());
+        propiedades.put("convenio.SEAL.url", "http://localhost:" + sealServer.port() + "/seal");
+        propiedades.put("convenio.CLARO.url", "http://localhost:" + claroServer.port() + "/mockServiciosClaro");
+        propiedades.put("convenio.UNIVCUSCO.url", "http://localhost:" + ucuscoServer.port() + "/mockRecaudosSoapBinding");
+        propiedades.put("convenio.YAGANASTE.url", "http://localhost:" + yaganasteServer.port() + "/mockSigmaService");
+        propiedades.put("convenio.MUNICIPALIDAD_CUSCO.url",
+            "http://localhost:" + muniCuscoServer.port() + "/api/servicio/recuperar_orden_pago");
+        propiedades.put("convenio.PAYTOPERU.url", "http://localhost:" + payToPeruServer.port() + "/cmac/consulta_pago");
         return propiedades;
     }
 
     @Override
     public void stop() {
-        if (elseServer != null) {
-            elseServer.stop();
+        for (WireMockServer servidor : new WireMockServer[] {
+            elseServer, euServer, sealServer, claroServer, ucuscoServer, yaganasteServer, muniCuscoServer, payToPeruServer }) {
+            if (servidor != null) {
+                servidor.stop();
+            }
         }
-        if (euServer != null) {
-            euServer.stop();
-        }
-        if (sealServer != null) {
-            sealServer.stop();
-        }
+    }
+
+    private static WireMockServer servidor() {
+        WireMockServer servidor = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+        servidor.start();
+        return servidor;
     }
 
     private void configurarElse() {
@@ -128,7 +149,7 @@ public class ConveniosWireMockResource implements QuarkusTestResourceLifecycleMa
             .willReturn(okJson("{\"codigo\":\"00\",\"mensaje\":\"CORRECTO\",\"nroSumin\":\"800006812\","
                 + "\"numFactura\":\"201800100000\",\"numOperacionEmpresa\":\"654321\"}")));
         euServer.stubFor(post(urlPathEqualTo("/api/v1/electro/extorno"))
-            .willReturn(okJson("{\"codigo\":\"00\",\"mensaje\":\"CORRECTO\"}")));
+            .willReturn(aResponse().withStatus(500).withBody("falla simulada")));
         euServer.stubFor(post(urlPathEqualTo("/api/v1/electro/extorno_automatico_pago"))
             .willReturn(okJson("{\"codigo\":\"00\",\"mensaje\":\"CORRECTO\"}")));
         euServer.stubFor(post(urlPathEqualTo("/api/v1/electro/extorno_automatico"))
@@ -140,6 +161,52 @@ public class ConveniosWireMockResource implements QuarkusTestResourceLifecycleMa
             .willReturn(aResponse().withStatus(200)
                 .withHeader("Content-Type", "text/plain; charset=ISO-8859-1")
                 .withBody(sealConsultaResponse())));
+    }
+
+    private void configurarClaro() {
+        String respuesta = XML_HEADER + "<Envelope><Body><pagoResponse><return>"
+            + "<codigoRespuesta>00</codigoRespuesta>"
+            + "<codigoAutorizacion>AUTH-123</codigoAutorizacion>"
+            + "</return></pagoResponse></Body></Envelope>";
+        claroServer.stubFor(post(urlPathEqualTo("/mockServiciosClaro"))
+            .withRequestBody(containing("<ser:pago>"))
+            .willReturn(aResponse().withStatus(200)
+                .withHeader("Content-Type", "text/xml; charset=utf-8")
+                .withBody(respuesta)));
+    }
+
+    private void configurarUCusco() {
+        String respuesta = XML_HEADER + "<Envelope><Body><AutoExtornoResponse>"
+            + "<resultado><codigo>00</codigo><mensaje>OK</mensaje></resultado>"
+            + "</AutoExtornoResponse></Body></Envelope>";
+        ucuscoServer.stubFor(post(urlPathEqualTo("/mockRecaudosSoapBinding"))
+            .withRequestBody(containing("<uac:AutoExtorno>"))
+            .willReturn(aResponse().withStatus(200)
+                .withHeader("Content-Type", "text/xml; charset=utf-8")
+                .withBody(respuesta)));
+    }
+
+    private void configurarYaGanaste() {
+        String respuesta = XML_HEADER + "<Envelope><Body><echoResponse>"
+            + "<codigo>00</codigo><mensaje>OK</mensaje>"
+            + "</echoResponse></Body></Envelope>";
+        yaganasteServer.stubFor(post(urlPathEqualTo("/mockSigmaService"))
+            .withRequestBody(containing("<net:echo>"))
+            .willReturn(aResponse().withStatus(200)
+                .withHeader("Content-Type", "text/xml; charset=utf-8")
+                .withBody(respuesta)));
+    }
+
+    private void configurarMuniCusco() {
+        muniCuscoServer.stubFor(post(urlPathEqualTo("/api/servicio/recuperar_orden_pago"))
+            .willReturn(okJson("{\"status\":\"00\",\"message\":\"OK\",\"data\":[{\"ordenpago\":\"123\"}]}")));
+    }
+
+    private void configurarPayToPeru() {
+        payToPeruServer.stubFor(post(urlPathEqualTo("/cmac/consulta_pago"))
+            .willReturn(okJson("{\"berror\":false,\"cmensaje\":\"OK\",\"ncodigo_pago\":123,"
+                + "\"cnro_documento\":\"12345678\",\"cnombres\":\"JUAN\",\"capellidos\":\"PEREZ\","
+                + "\"cemail\":\"juan@example.com\",\"nimporte\":10.5,\"nmoneda\":1,\"cconcepto\":\"RECIBO\"}")));
     }
 
     private String sealConsultaResponse() {

@@ -1,37 +1,35 @@
 package org.canalesCMAC.adapter.out.electrosureste;
 
-import java.io.StringReader;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import org.canalesCMAC.adapter.out.soap.NodoXml;
+import org.canalesCMAC.adapter.out.soap.SoapSupport;
+import org.canalesCMAC.application.CatalogoCodigos;
+import org.canalesCMAC.application.port.MapeadorOperacion;
+import org.canalesCMAC.application.port.PeticionSalida;
+import org.canalesCMAC.application.port.RespuestaCruda;
 import org.canalesCMAC.domain.exception.OperadorNoSoportadoException;
 import org.canalesCMAC.domain.model.Canonico;
 import org.canalesCMAC.domain.model.Institucion;
 import org.canalesCMAC.domain.model.Operador;
 import org.canalesCMAC.domain.model.RecaudacionRequest;
 import org.canalesCMAC.domain.model.RecaudacionResponse;
+import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
-import javax.xml.XMLConstants;
-import javax.xml.parsers.DocumentBuilderFactory;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.xml.sax.InputSource;
-
 @ApplicationScoped
-public class ElseSoapMessageCodec {
+public class ElseSoapMessageCodec implements MapeadorOperacion {
 
-    private static final String SOAP_ENVELOPE_NS = "http://schemas.xmlsoap.org/soap/envelope/";
+    private static final Logger LOG = Logger.getLogger(ElseSoapMessageCodec.class);
+    private static final String CONTENT_TYPE = "text/xml; charset=utf-8";
     private static final DateTimeFormatter FECHA_SOAP = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
 
     @ConfigProperty(name = "recaudacion.electrosureste.usuario")
@@ -43,210 +41,61 @@ public class ElseSoapMessageCodec {
     @ConfigProperty(name = "recaudacion.electrosureste.soap.namespace", defaultValue = "http://tempuri.org/")
     String namespace;
 
-    public String serializar(RecaudacionRequest peticion) {
-        String operacion = operacion(peticion.operador());
-        Map<String, String> campos = campos(peticion.operador(), peticion);
-        StringBuilder xml = new StringBuilder();
-        xml.append("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
-        xml.append("<soap:Envelope xmlns:soap=\"").append(SOAP_ENVELOPE_NS)
-           .append("\" xmlns:els=\"").append(namespace).append("\">");
-        xml.append("<soap:Body>");
-        xml.append("<els:").append(operacion).append(">");
-        campos.forEach((campo, valor) ->
-            xml.append("<els:").append(campo).append(">").append(escapar(valor)).append("</els:").append(campo).append(">"));
-        xml.append("</els:").append(operacion).append(">");
-        xml.append("</soap:Body></soap:Envelope>");
-        return xml.toString();
+    @Inject
+    CatalogoCodigos catalogo;
+
+    @Override
+    public Institucion institucion() {
+        return Institucion.ELSE;
     }
 
-    public RecaudacionResponse deserializar(String xmlSoap, RecaudacionRequest peticion) {
-        Element raizRespuesta = raizRespuesta(xmlSoap);
-        String codigo = mapeoCodigo(peticion.operador(), raizRespuesta);
-        String mensaje = mapeoMensaje(peticion.operador(), raizRespuesta);
-        Map<String, Object> datos = "00".equals(codigo)
-            ? mapearDatos(peticion.operador(), raizRespuesta)
-            : Map.of();
+    @Override
+    public PeticionSalida construir(RecaudacionRequest peticion) {
+        OperacionElse operacion = OperacionElse.de(peticion.operador());
+        LOG.debugf("construyendo SOAP ELSE operador=%s soap=%s", peticion.operador(), operacion.soap());
+        Map<String, String> campos = new LinkedHashMap<>();
+        operacion.campos(campos, peticion, usuario, clave);
+        return new PeticionSalida(SoapSupport.sobre(namespace, operacion.soap(), campos), CONTENT_TYPE);
+    }
+
+    @Override
+    public RecaudacionResponse interpretar(RespuestaCruda respuesta, RecaudacionRequest peticion) {
+        OperacionElse operacion = OperacionElse.de(peticion.operador());
+        NodoXml raiz = SoapSupport.cuerpo(respuesta.cuerpo());
+        String codigo = mapeoCodigo(operacion, raiz);
+        String mensaje = catalogo.mensaje(Institucion.ELSE, codigo, mapeoMensaje(operacion, raiz));
+        Map<String, Object> datos = "00".equals(codigo) ? mapearDatos(operacion, raiz) : Map.of();
+        LOG.debugf("SOAP ELSE interpretado operador=%s codigo=%s", peticion.operador(), codigo);
         return new RecaudacionResponse(Institucion.ELSE, peticion.operador(), codigo, mensaje, datos);
     }
 
-    private Map<String, String> campos(Operador operador, RecaudacionRequest peticion) {
-        Map<String, String> parametros = new LinkedHashMap<>();
-        switch (operador) {
-            case CONSULTA_DEUDA -> {
-                parametros.put("IdentificadorEntidadConsulta", UUID.randomUUID().toString());
-                parametros.put("AgenciaEntidadConsulta", peticion.datos().getOrDefault(Canonico.AGENCIA, "Agencia Principal").toString());
-                parametros.put("MedioPagoEntidadConsulta", peticion.datos().getOrDefault(Canonico.MEDIO_PAGO, "Ventanilla").toString());
-                parametros.put("FechaConsulta", ahoraSoap());
-                parametros.put("UsuarioConsulta", usuario);
-                parametros.put("ClaveUsuario", clave);
-                parametros.put("TipoConsulta", peticion.datos().getOrDefault(Canonico.TIPO_CONSULTA, "1").toString());
-                parametros.put("DatoConsulta", datoObligatorio(peticion, Canonico.DATO_CONSULTA));
-            }
-            case PAGO_DEUDA, CONSULTA_PAGO -> {
-                parametros.put("IdentificadorTransaccion", datoObligatorio(peticion, Canonico.IDENTIFICADOR_TRANSACCION));
-                parametros.put("IdentificadorEntidadPago", UUID.randomUUID().toString());
-                parametros.put("AgenciaEntidadPago", peticion.datos().getOrDefault(Canonico.AGENCIA, "Agencia Principal").toString());
-                parametros.put("MedioPagoEntidadPago", peticion.datos().getOrDefault(Canonico.MEDIO_PAGO, "Ventanilla").toString());
-                parametros.put("FechaPago", ahoraSoap());
-                parametros.put("UsuarioPago", usuario);
-                parametros.put("ClaveUsuario", clave);
-                parametros.put("CodigoComprobante", datoObligatorio(peticion, Canonico.NUMERO_COMPROBANTE));
-                parametros.put("CodigoSuministro", datoObligatorio(peticion, Canonico.NUMERO_SUMINISTRO));
-                parametros.put("MontoPago", monto(peticion));
-            }
-            case EXTORNO_PAGO -> {
-                parametros.put("IdentificadorTransaccion", datoObligatorio(peticion, Canonico.IDENTIFICADOR_TRANSACCION));
-                parametros.put("CodigoIdentificadorPago", datoObligatorio(peticion, Canonico.IDENTIFICADOR_PAGO));
-                parametros.put("IdentificadorEntidadExtorno", UUID.randomUUID().toString());
-                parametros.put("CodigoMotivoExtorno", peticion.datos().getOrDefault(Canonico.MOTIVO_EXSTORNO, "1").toString());
-                parametros.put("AgenciaEntidadExtorno", peticion.datos().getOrDefault(Canonico.AGENCIA, "Agencia Principal").toString());
-                parametros.put("MedioPagoEntidadExtorno", peticion.datos().getOrDefault(Canonico.MEDIO_PAGO, "Ventanilla").toString());
-                parametros.put("FechaExtornoEntidad", ahoraSoap());
-                parametros.put("UsuarioExtorno", usuario);
-                parametros.put("ClaveUsuario", clave);
-                parametros.put("CodigoComprobante", datoObligatorio(peticion, Canonico.NUMERO_COMPROBANTE));
-                parametros.put("CodigoSuministro", datoObligatorio(peticion, Canonico.NUMERO_SUMINISTRO));
-                parametros.put("MontoExtorno", monto(peticion));
-            }
-            default -> throw new OperadorNoSoportadoException("Operador " + operador + " no soportado por ELSE");
-        }
-        return parametros;
+    private String mapeoCodigo(OperacionElse operacion, NodoXml raiz) {
+        String codigo = raiz.textoDe(operacion.campoCodigo());
+        return (codigo == null || codigo.isBlank()) ? "99" : ("0".equals(codigo.trim()) ? "00" : codigo.trim());
     }
 
-    private Map<String, Object> mapearDatos(Operador operador, Element raiz) {
-        Map<String, Object> datos = new HashMap<>();
-        switch (operador) {
-            case CONSULTA_DEUDA -> {
-                poner(datos, Canonico.IDENTIFICADOR_TRANSACCION, texto(raiz, "IdentificadorTransaccion"));
-                poner(datos, Canonico.NUMERO_COMPROBANTE, texto(raiz, "CodigoComprobante"));
-                poner(datos, Canonico.NUMERO_SUMINISTRO, texto(raiz, "CodigoSuministro"));
-                poner(datos, Canonico.NOMBRE_CLIENTE, texto(raiz, "NombreCliente"));
-                poner(datos, Canonico.DISTRITO_CLIENTE, texto(raiz, "DistritoCliente"));
-                poner(datos, Canonico.DIRECCION_CLIENTE, texto(raiz, "DireccionCliente"));
-                poner(datos, Canonico.DOCUMENTO_CLIENTE, texto(raiz, "NumeroDocumento"));
-                poner(datos, Canonico.MONTO_PAGAR, decimal(texto(raiz, "MontoAPagarConsulta")));
-                poner(datos, Canonico.FECHA_EMISION, texto(raiz, "FechaEmision"));
-                poner(datos, Canonico.FECHA_VENCIMIENTO, texto(raiz, "FechaVencimiento"));
-                poner(datos, Canonico.FECHA_VENCIMIENTO_RSP, texto(raiz, "FechaVencimientoRSP"));
-                poner(datos, "detalleConsulta", texto(raiz, "DetalleConsulta"));
-            }
-            case PAGO_DEUDA -> {
-                poner(datos, Canonico.IDENTIFICADOR_TRANSACCION, texto(raiz, "IdentificadorTransaccion"));
-                poner(datos, Canonico.IDENTIFICADOR_PAGO, texto(raiz, "CodigoIdentificadorPago"));
-                poner(datos, Canonico.NUMERO_COMPROBANTE, texto(raiz, "CodigoComprobante"));
-                poner(datos, Canonico.NUMERO_SUMINISTRO, texto(raiz, "CodigoSuministro"));
-                poner(datos, Canonico.MONTO, decimal(texto(raiz, "MontoPago")));
-                poner(datos, "fechaRegistroPago", texto(raiz, "FechaRegistroPago"));
-            }
-            case CONSULTA_PAGO -> {
-                poner(datos, Canonico.IDENTIFICADOR_TRANSACCION, texto(raiz, "IdentificadorTransaccion"));
-                poner(datos, Canonico.IDENTIFICADOR_PAGO, texto(raiz, "CodigoIdentificadorPago"));
-                poner(datos, Canonico.NUMERO_COMPROBANTE, texto(raiz, "CodigoComprobante"));
-                poner(datos, Canonico.NUMERO_SUMINISTRO, texto(raiz, "CodigoSuministro"));
-                poner(datos, Canonico.MONTO, decimal(texto(raiz, "MontoPago")));
-                poner(datos, "fechaRegistroPago", texto(raiz, "FechaRegistroPago"));
-            }
-            case EXTORNO_PAGO -> {
-                poner(datos, Canonico.IDENTIFICADOR_TRANSACCION, texto(raiz, "IdentificadorTransaccion"));
-                poner(datos, Canonico.IDENTIFICADOR_PAGO, texto(raiz, "CodigoIdentificadorExtorno"));
-                poner(datos, Canonico.NUMERO_COMPROBANTE, texto(raiz, "CodigoComprobante"));
-                poner(datos, Canonico.NUMERO_SUMINISTRO, texto(raiz, "CodigoSuministro"));
-                poner(datos, Canonico.MONTO, decimal(texto(raiz, "MontoExtorno")));
-                poner(datos, "fechaRegistroExtorno", texto(raiz, "FechaRegistroExtorno"));
-            }
-            default -> throw new OperadorNoSoportadoException("Operador " + operador + " no soportado por ELSE");
-        }
+    private String mapeoMensaje(OperacionElse operacion, NodoXml raiz) {
+        String mensaje = raiz.textoDe(operacion.campoMensaje());
+        return mensaje == null ? "" : mensaje.trim();
+    }
+
+    private Map<String, Object> mapearDatos(OperacionElse operacion, NodoXml raiz) {
+        Map<String, Object> datos = new LinkedHashMap<>();
+        operacion.datos(datos, raiz);
         return datos;
     }
 
-    private void poner(Map<String, Object> destino, String clave, Object valor) {
+    private static String texto(NodoXml raiz, String nombre) {
+        return raiz.textoDe(nombre);
+    }
+
+    private static void poner(Map<String, Object> destino, String clave, Object valor) {
         if (valor != null) {
             destino.put(clave, valor);
         }
     }
 
-    private String mapeoCodigo(Operador operador, Element raiz) {
-        String campo = switch (operador) {
-            case CONSULTA_DEUDA -> "CodigoMensajeRetornoConsulta";
-            case PAGO_DEUDA -> "CodigoMensajeRetornoPago";
-            case CONSULTA_PAGO -> "CodigoMensajeRetornoConsultaPago";
-            case EXTORNO_PAGO -> "CodigoMensajeRetornoExtorno";
-            default -> throw new OperadorNoSoportadoException("Operador " + operador + " no soportado por ELSE");
-        };
-        String codigo = texto(raiz, campo);
-        return (codigo == null || codigo.isBlank()) ? "99" : ("0".equals(codigo.trim()) ? "00" : codigo.trim());
-    }
-
-    private String mapeoMensaje(Operador operador, Element raiz) {
-        String campo = switch (operador) {
-            case CONSULTA_DEUDA -> "MensajeRetornoConsulta";
-            case PAGO_DEUDA -> "MensajeRetornoPago";
-            case CONSULTA_PAGO -> "MensajeRetornoConsultaPago";
-            case EXTORNO_PAGO -> "MensajeRetornoExtorno";
-            default -> throw new OperadorNoSoportadoException("Operador " + operador + " no soportado por ELSE");
-        };
-        String mensaje = texto(raiz, campo);
-        return mensaje == null ? "" : mensaje.trim();
-    }
-
-    private Element raizRespuesta(String xmlSoap) {
-        try {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(false);
-            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
-            Document documento = factory.newDocumentBuilder().parse(new InputSource(new StringReader(xmlSoap)));
-            Element body = null;
-            NodeList hijos = documento.getDocumentElement().getChildNodes();
-            for (int i = 0; i < hijos.getLength(); i++) {
-                Node n = hijos.item(i);
-                if (n instanceof Element e && "Body".equals(nombreLocal(e.getTagName()))) {
-                    body = e;
-                    break;
-                }
-            }
-            if (body == null) {
-                throw new IllegalArgumentException("SOAP sin elemento Body");
-            }
-            NodeList hijosBody = body.getChildNodes();
-            for (int i = 0; i < hijosBody.getLength(); i++) {
-                Node n = hijosBody.item(i);
-                if (n instanceof Element) {
-                    return (Element) n;
-                }
-            }
-            throw new IllegalArgumentException("SOAP sin operación de respuesta");
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Respuesta SOAP no válida: " + e.getMessage(), e);
-        }
-    }
-
-    private String texto(Element raiz, String nombre) {
-        NodeList hijos = raiz.getChildNodes();
-        for (int i = 0; i < hijos.getLength(); i++) {
-            Node n = hijos.item(i);
-            if (n instanceof Element e && nombre.equals(nombreLocal(e.getTagName()))) {
-                return e.getTextContent();
-            }
-        }
-        return null;
-    }
-
-    private String nombreLocal(String nombreConPrefijo) {
-        int indice = nombreConPrefijo.indexOf(':');
-        return indice < 0 ? nombreConPrefijo : nombreConPrefijo.substring(indice + 1);
-    }
-
-    private String operacion(Operador operador) {
-        return switch (operador) {
-            case CONSULTA_DEUDA -> "ConsultaDeuda";
-            case PAGO_DEUDA -> "PagoDeuda";
-            case CONSULTA_PAGO -> "ConsultaPago";
-            case EXTORNO_PAGO -> "ExtornoPago";
-            default -> throw new OperadorNoSoportadoException("Operador " + operador + " no soportado por ELSE");
-        };
-    }
-
-    private String datoObligatorio(RecaudacionRequest peticion, String clave) {
+    private static String datoObligatorio(RecaudacionRequest peticion, String clave) {
         Object valor = peticion.datos().get(clave);
         if (valor == null || valor.toString().isBlank()) {
             throw new IllegalArgumentException("Campo canónico obligatorio ausente: " + clave);
@@ -254,7 +103,7 @@ public class ElseSoapMessageCodec {
         return valor.toString();
     }
 
-    private String monto(RecaudacionRequest peticion) {
+    private static String monto(RecaudacionRequest peticion) {
         Object monto = peticion.datos().get(Canonico.MONTO);
         if (monto == null) {
             throw new IllegalArgumentException("Campo canónico obligatorio ausente: monto");
@@ -262,23 +111,193 @@ public class ElseSoapMessageCodec {
         return new BigDecimal(monto.toString()).setScale(2).toPlainString();
     }
 
-    private BigDecimal decimal(String valor) {
+    private static BigDecimal decimal(String valor) {
         return valor == null || valor.isBlank() ? null : new BigDecimal(valor);
     }
 
-    private String ahoraSoap() {
+    private static String ahoraSoap() {
         return LocalDateTime.now().format(FECHA_SOAP);
     }
 
-    private String escapar(String valor) {
-        if (valor == null) {
-            return "";
+    private enum OperacionElse {
+        CONSULTA_DEUDA {
+            @Override
+            String soap() {
+                return "ConsultaDeuda";
+            }
+
+            @Override
+            String campoCodigo() {
+                return "CodigoMensajeRetornoConsulta";
+            }
+
+            @Override
+            String campoMensaje() {
+                return "MensajeRetornoConsulta";
+            }
+
+            @Override
+            void campos(Map<String, String> p, RecaudacionRequest r, String usuario, String clave) {
+                p.put("IdentificadorEntidadConsulta", UUID.randomUUID().toString());
+                p.put("AgenciaEntidadConsulta", r.datos().getOrDefault(Canonico.AGENCIA, "Agencia Principal").toString());
+                p.put("MedioPagoEntidadConsulta", r.datos().getOrDefault(Canonico.MEDIO_PAGO, "Ventanilla").toString());
+                p.put("FechaConsulta", ahoraSoap());
+                p.put("UsuarioConsulta", usuario);
+                p.put("ClaveUsuario", clave);
+                p.put("TipoConsulta", r.datos().getOrDefault(Canonico.TIPO_CONSULTA, "1").toString());
+                p.put("DatoConsulta", datoObligatorio(r, Canonico.DATO_CONSULTA));
+            }
+
+            @Override
+            void datos(Map<String, Object> d, NodoXml raiz) {
+                poner(d, Canonico.IDENTIFICADOR_TRANSACCION, texto(raiz, "IdentificadorTransaccion"));
+                poner(d, Canonico.NUMERO_COMPROBANTE, texto(raiz, "CodigoComprobante"));
+                poner(d, Canonico.NUMERO_SUMINISTRO, texto(raiz, "CodigoSuministro"));
+                poner(d, Canonico.NOMBRE_CLIENTE, texto(raiz, "NombreCliente"));
+                poner(d, Canonico.DISTRITO_CLIENTE, texto(raiz, "DistritoCliente"));
+                poner(d, Canonico.DIRECCION_CLIENTE, texto(raiz, "DireccionCliente"));
+                poner(d, Canonico.DOCUMENTO_CLIENTE, texto(raiz, "NumeroDocumento"));
+                poner(d, Canonico.MONTO_PAGAR, decimal(texto(raiz, "MontoAPagarConsulta")));
+                poner(d, Canonico.FECHA_EMISION, texto(raiz, "FechaEmision"));
+                poner(d, Canonico.FECHA_VENCIMIENTO, texto(raiz, "FechaVencimiento"));
+                poner(d, Canonico.FECHA_VENCIMIENTO_RSP, texto(raiz, "FechaVencimientoRSP"));
+                poner(d, "detalleConsulta", texto(raiz, "DetalleConsulta"));
+            }
+        },
+        PAGO_DEUDA {
+            @Override
+            String soap() {
+                return "PagoDeuda";
+            }
+
+            @Override
+            String campoCodigo() {
+                return "CodigoMensajeRetornoPago";
+            }
+
+            @Override
+            String campoMensaje() {
+                return "MensajeRetornoPago";
+            }
+
+            @Override
+            void campos(Map<String, String> p, RecaudacionRequest r, String usuario, String clave) {
+                camposPago(p, r, usuario, clave);
+            }
+
+            @Override
+            void datos(Map<String, Object> d, NodoXml raiz) {
+                datosPago(d, raiz);
+            }
+        },
+        CONSULTA_PAGO {
+            @Override
+            String soap() {
+                return "ConsultaPago";
+            }
+
+            @Override
+            String campoCodigo() {
+                return "CodigoMensajeRetornoConsultaPago";
+            }
+
+            @Override
+            String campoMensaje() {
+                return "MensajeRetornoConsultaPago";
+            }
+
+            @Override
+            void campos(Map<String, String> p, RecaudacionRequest r, String usuario, String clave) {
+                camposPago(p, r, usuario, clave);
+            }
+
+            @Override
+            void datos(Map<String, Object> d, NodoXml raiz) {
+                datosPago(d, raiz);
+            }
+        },
+        EXTORNO_PAGO {
+            @Override
+            String soap() {
+                return "ExtornoPago";
+            }
+
+            @Override
+            String campoCodigo() {
+                return "CodigoMensajeRetornoExtorno";
+            }
+
+            @Override
+            String campoMensaje() {
+                return "MensajeRetornoExtorno";
+            }
+
+            @Override
+            void campos(Map<String, String> p, RecaudacionRequest r, String usuario, String clave) {
+                p.put("IdentificadorTransaccion", datoObligatorio(r, Canonico.IDENTIFICADOR_TRANSACCION));
+                p.put("CodigoIdentificadorPago", datoObligatorio(r, Canonico.IDENTIFICADOR_PAGO));
+                p.put("IdentificadorEntidadExtorno", UUID.randomUUID().toString());
+                p.put("CodigoMotivoExtorno", r.datos().getOrDefault(Canonico.MOTIVO_EXSTORNO, "1").toString());
+                p.put("AgenciaEntidadExtorno", r.datos().getOrDefault(Canonico.AGENCIA, "Agencia Principal").toString());
+                p.put("MedioPagoEntidadExtorno", r.datos().getOrDefault(Canonico.MEDIO_PAGO, "Ventanilla").toString());
+                p.put("FechaExtornoEntidad", ahoraSoap());
+                p.put("UsuarioExtorno", usuario);
+                p.put("ClaveUsuario", clave);
+                p.put("CodigoComprobante", datoObligatorio(r, Canonico.NUMERO_COMPROBANTE));
+                p.put("CodigoSuministro", datoObligatorio(r, Canonico.NUMERO_SUMINISTRO));
+                p.put("MontoExtorno", monto(r));
+            }
+
+            @Override
+            void datos(Map<String, Object> d, NodoXml raiz) {
+                poner(d, Canonico.IDENTIFICADOR_TRANSACCION, texto(raiz, "IdentificadorTransaccion"));
+                poner(d, Canonico.IDENTIFICADOR_PAGO, texto(raiz, "CodigoIdentificadorExtorno"));
+                poner(d, Canonico.NUMERO_COMPROBANTE, texto(raiz, "CodigoComprobante"));
+                poner(d, Canonico.NUMERO_SUMINISTRO, texto(raiz, "CodigoSuministro"));
+                poner(d, Canonico.MONTO, decimal(texto(raiz, "MontoExtorno")));
+                poner(d, "fechaRegistroExtorno", texto(raiz, "FechaRegistroExtorno"));
+            }
+        };
+
+        abstract String soap();
+
+        abstract String campoCodigo();
+
+        abstract String campoMensaje();
+
+        abstract void campos(Map<String, String> parametros, RecaudacionRequest peticion, String usuario, String clave);
+
+        abstract void datos(Map<String, Object> datos, NodoXml raiz);
+
+        static OperacionElse de(Operador operador) {
+            for (OperacionElse operacion : values()) {
+                if (operacion.name().equals(operador.name())) {
+                    return operacion;
+                }
+            }
+            throw new OperadorNoSoportadoException("Operador " + operador + " no soportado por ELSE");
         }
-        return valor
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\"", "&quot;")
-            .replace("'", "&apos;");
+
+        private static void camposPago(Map<String, String> p, RecaudacionRequest r, String usuario, String clave) {
+            p.put("IdentificadorTransaccion", datoObligatorio(r, Canonico.IDENTIFICADOR_TRANSACCION));
+            p.put("IdentificadorEntidadPago", UUID.randomUUID().toString());
+            p.put("AgenciaEntidadPago", r.datos().getOrDefault(Canonico.AGENCIA, "Agencia Principal").toString());
+            p.put("MedioPagoEntidadPago", r.datos().getOrDefault(Canonico.MEDIO_PAGO, "Ventanilla").toString());
+            p.put("FechaPago", ahoraSoap());
+            p.put("UsuarioPago", usuario);
+            p.put("ClaveUsuario", clave);
+            p.put("CodigoComprobante", datoObligatorio(r, Canonico.NUMERO_COMPROBANTE));
+            p.put("CodigoSuministro", datoObligatorio(r, Canonico.NUMERO_SUMINISTRO));
+            p.put("MontoPago", monto(r));
+        }
+
+        private static void datosPago(Map<String, Object> d, NodoXml raiz) {
+            poner(d, Canonico.IDENTIFICADOR_TRANSACCION, texto(raiz, "IdentificadorTransaccion"));
+            poner(d, Canonico.IDENTIFICADOR_PAGO, texto(raiz, "CodigoIdentificadorPago"));
+            poner(d, Canonico.NUMERO_COMPROBANTE, texto(raiz, "CodigoComprobante"));
+            poner(d, Canonico.NUMERO_SUMINISTRO, texto(raiz, "CodigoSuministro"));
+            poner(d, Canonico.MONTO, decimal(texto(raiz, "MontoPago")));
+            poner(d, "fechaRegistroPago", texto(raiz, "FechaRegistroPago"));
+        }
     }
 }
